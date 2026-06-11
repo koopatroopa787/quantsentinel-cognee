@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Standalone build for Docker/Cloud Run — bundles a minimal server.js + node_modules.
+  output: "standalone",
   // Raise the Node.js HTTP server socket timeout so long-running SSE streams
   // (ADK timeout 90s + fallback pipeline ~60s) don't get dropped mid-stream.
   serverExternalPackages: [],
