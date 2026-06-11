@@ -1,0 +1,30 @@
+name: Backend unit tests
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "backend/tools/**"
+      - "backend/tests/**"
+      - ".github/workflows/backend-tests.yml"
+  pull_request:
+    paths:
+      - "backend/tools/**"
+      - "backend/tests/**"
+      - ".github/workflows/backend-tests.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install pytest numpy scipy pandas
+
+      - name: Run signal factory and stats tools tests
+        run: pytest backend/tests/ -v

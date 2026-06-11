@@ -1,0 +1,84 @@
+"""Unit tests for backend.tools.signal_factory.
+
+These tests check that `generate_signal_code` routes each hypothesis to the
+right strategy template and bakes the hypothesis-specific parameters (RSI
+period/threshold, SMA windows, momentum lookback, ...) into the generated
+code, plus that every generated snippet is syntactically valid Python.
+"""
+
+from __future__ import annotations
+
+import ast
+
+import pytest
+
+from backend.tools.signal_factory import generate_signal_code
+
+
+def _compiles(code: str) -> bool:
+    ast.parse(code)
+    return True
+
+
+@pytest.mark.parametrize(
+    "hypothesis",
+    [
+        "Does a 14-day RSI below 30 on SPY generate significant mean-reversion returns?",
+        "Is there a golden cross signal when the 50-day SMA crosses the 200-day SMA?",
+        "Does SPY outperform when price is above the 200-day SMA?",
+        "Is SPY price above its 10-month SMA a reliable trend filter?",
+        "Does 12-month momentum predict next-month returns?",
+        "Do Bollinger Band breakouts on QQQ generate alpha?",
+        "Does a MACD crossover on AAPL generate excess returns?",
+        "Does SPY rally for 5 days following an FOMC rate decision?",
+        "Does a low realised-volatility regime improve risk-adjusted returns?",
+        "A completely generic hypothesis with no recognizable indicator",
+    ],
+)
+def test_generated_code_is_valid_python(hypothesis):
+    code = generate_signal_code(hypothesis)
+    assert _compiles(code)
+    # every template returns a dict with these keys
+    for key in ("equity_curve", "returns", "sharpe", "max_drawdown", "win_rate", "num_trades"):
+        assert f'"{key}"' in code
+
+
+def test_rsi_hypothesis_bakes_in_period_and_threshold():
+    code = generate_signal_code(
+        "Does a 14-day RSI below 30 on SPY generate significant mean-reversion "
+        "returns over 5 trading days?"
+    )
+    assert "rolling(14)" in code
+    assert "rsi < 30" in code
+
+
+def test_golden_cross_uses_detected_sma_windows():
+    code = generate_signal_code(
+        "Is there a golden cross signal when the 50-day SMA crosses above the 200-day SMA?"
+    )
+    assert "rolling(50)" in code
+    assert "rolling(200)" in code
+
+
+def test_price_vs_monthly_sma_converts_months_to_trading_days():
+    code = generate_signal_code("Is SPY price above its 10-month SMA a reliable trend filter?")
+    # 10 months -> 10 * 21 = 210 trading days
+    assert "rolling(210)" in code
+    assert "df['close'] > sma" in code
+
+
+def test_price_vs_sma_below_uses_less_than_comparator():
+    code = generate_signal_code("Does SPY underperform when price is below the 200-day SMA?")
+    assert "rolling(200)" in code
+    assert "df['close'] < sma" in code
+
+
+def test_momentum_hypothesis_uses_lookback():
+    code = generate_signal_code("Does 252-day momentum predict next-month returns?")
+    assert "shift(252)" in code
+
+
+def test_unrecognized_hypothesis_falls_back_to_mean_reversion():
+    code = generate_signal_code("A completely generic hypothesis with no recognizable indicator")
+    assert "5-day rolling mean-reversion" in code
+    assert "rolling(5).mean()" in code
