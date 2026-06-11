@@ -27,7 +27,7 @@ from tools.chart_tools import generate_equity_curve_chart
 from tools.market_data import fetch_fomc_dates, fetch_ohlcv
 from tools.phoenix_query_tool import extract_score_series, query_phoenix_traces
 from tools.run_store import get_history, get_improvement_points, get_store_stats, save_run
-from tools.signal_factory import generate_signal_code
+from tools.signal_factory import describe_signal, generate_signal_code
 from tools.suggestion_engine import generate_suggestion
 from tools.stats_tools import bootstrap_ci, compute_sharpe, compute_t_test
 
@@ -373,40 +373,16 @@ async def _run_adk_stream(payload: RunRequest) -> AsyncGenerator[str, None]:
 
 
 def _infer_signal_description(hypothesis: str) -> str:
-    """Infer a human-readable signal description from the hypothesis text."""
-    h = hypothesis.lower()
-    if "golden cross" in h or "sma" in h or "moving average" in h or "crossover" in h:
-        return (
-            "Moving-average crossover signal: long when the short-period SMA is above "
-            "the long-period SMA, flat otherwise. Equity curve computed as the cumulative "
-            "product of daily strategy returns."
-        )
-    if "rsi" in h:
-        return (
-            "RSI mean-reversion signal: long when the 14-day RSI crosses below the "
-            "specified threshold (oversold), flat otherwise."
-        )
-    if "fomc" in h or "fed" in h or "announcement" in h or "rate" in h:
-        return (
-            "Event-study proxy: 5-day rolling mean-reversion signal used as a structural "
-            "baseline. Note: this fallback pipeline does not use FOMC date data directly — "
-            "the signal approximates market behaviour around event windows using "
-            "momentum reversal."
-        )
-    if "vix" in h or "volatility" in h:
-        return (
-            "Volatility-regime signal: long when 5-day rolling return is negative "
-            "(mean-reversion in elevated-volatility environments), flat otherwise."
-        )
-    if "momentum" in h or "trend" in h:
-        return (
-            "Momentum signal: long when 5-day rolling mean return is positive, "
-            "flat otherwise. Captures short-term price continuation."
-        )
-    return (
-        "5-day rolling mean-reversion signal: long when the 5-day rolling mean "
-        "daily return is negative (expects reversal), flat otherwise."
-    )
+    """Human-readable signal description for the memo's Methodology section.
+
+    Delegates to signal_factory.describe_signal(), which is derived from the
+    exact same detection and parameter-extraction logic used by
+    generate_signal_code() — so this description can never disagree with the
+    code that actually ran (previously this used separate, looser keyword
+    checks and a hardcoded "14-day RSI", which could describe a different
+    signal than the one whose results were reported).
+    """
+    return describe_signal(hypothesis)
 
 
 def _build_conclusion(
@@ -562,8 +538,20 @@ async def _run_fallback_stream(payload: RunRequest) -> AsyncGenerator[str, None]
     # Best-effort extract ticker and dates from the hypothesis text
     hypothesis_upper = payload.hypothesis.upper()
     # Match common 1-5 char tickers (prioritise known ones if present)
-    known = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "QQQ", "SPY",
-             "IWM", "GLD", "TLT", "VIX", "BTC", "ETH"]
+    # Note: deliberately avoid single-letter and ambiguous tickers (e.g. "T", "F",
+    # "C", "V", "MA") that collide with common phrases like "t-test", "F-test" or
+    # "moving average (MA)" and would otherwise hijack the ticker match.
+    known = [
+        "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "TSLA", "NVDA", "META", "NFLX",
+        "AMD", "INTC", "CRM", "ORCL", "ADBE", "IBM", "CSCO", "QCOM", "AVGO",
+        "JPM", "BAC", "WFC", "GS", "MS", "AXP",
+        "JNJ", "PFE", "UNH", "MRK", "ABBV", "LLY",
+        "XOM", "CVX", "COP", "BA", "CAT", "GE", "GM", "DIS", "KO", "PEP",
+        "WMT", "HD", "NKE", "MCD", "PG", "VZ",
+        "QQQ", "SPY", "DIA", "IWM", "VTI", "EFA", "EEM",
+        "GLD", "SLV", "USO", "TLT", "HYG", "ARKK",
+        "VIX", "UVXY", "BTC", "ETH",
+    ]
     ticker = next((t for t in known if re.search(rf"\b{t}\b", hypothesis_upper)), "SPY")
 
     # Extract 4-digit years e.g. "2012" to "2024"

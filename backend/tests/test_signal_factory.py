@@ -12,7 +12,7 @@ import ast
 
 import pytest
 
-from backend.tools.signal_factory import generate_signal_code
+from backend.tools.signal_factory import describe_signal, generate_signal_code
 
 
 def _compiles(code: str) -> bool:
@@ -82,3 +82,86 @@ def test_unrecognized_hypothesis_falls_back_to_mean_reversion():
     code = generate_signal_code("A completely generic hypothesis with no recognizable indicator")
     assert "5-day rolling mean-reversion" in code
     assert "rolling(5).mean()" in code
+
+
+# ── Regression tests: short RSI periods / momentum lookbacks used to be ────
+# silently discarded (or, worse, mixed up with the threshold/hold-days) by
+# range-based positional extraction (e.g. RSI period had to be in 5..50, so
+# "2-day RSI" fell through to a default of 14 and the leftover "2" was
+# misassigned as the hold period).
+
+def test_short_rsi_period_is_honored():
+    code = generate_signal_code(
+        "Does a 2-day RSI below 10 on AAPL generate mean-reversion returns "
+        "over 3 trading days from 2018 to 2023?"
+    )
+    assert "rolling(2)" in code
+    assert "rsi < 10" in code
+    assert "rolling(3).max()" in code
+
+
+def test_rsi_parenthetical_period_is_honored():
+    code = generate_signal_code("Does RSI(2) below 5 on SPY generate mean reversion returns?")
+    assert "rolling(2)" in code
+    assert "rsi < 5" in code
+
+
+def test_rsi_above_threshold_uses_greater_than_comparator():
+    code = generate_signal_code("Is a 21-day RSI above 70 a good short-term overbought signal on QQQ?")
+    assert "rolling(21)" in code
+    assert "rsi > 70" in code
+
+
+def test_short_momentum_lookback_is_honored():
+    code = generate_signal_code("Does a 10-day momentum strategy on TSLA generate excess returns from 2019 to 2023?")
+    assert "shift(10)" in code
+
+
+def test_volatility_regime_routes_to_vix_filter():
+    code = generate_signal_code("Does a low realised-volatility regime improve risk-adjusted returns?")
+    assert "vol_20" in code and "vol_60" in code
+
+
+# ── describe_signal: the memo's methodology text must match the generated ──
+# code's actual parameters, not a separate hardcoded description.
+
+def test_describe_signal_reflects_actual_rsi_period():
+    hypothesis = "Does a 21-day RSI below 25 on AMZN generate mean-reversion returns over 10 trading days?"
+    code = generate_signal_code(hypothesis)
+    description = describe_signal(hypothesis)
+    assert "rolling(21)" in code
+    assert "21-day RSI" in description
+    assert "10 trading days" in description
+
+
+def test_describe_signal_for_macd_mentions_ema_not_sma():
+    description = describe_signal("Does a MACD crossover on AAPL generate excess returns?")
+    assert "MACD" in description
+    assert "EMA" in description
+    assert "SMA" not in description
+
+
+def test_describe_signal_for_fomc_matches_event_study_code():
+    hypothesis = "Does SPY rally for 5 days following an FOMC rate decision?"
+    code = generate_signal_code(hypothesis)
+    description = describe_signal(hypothesis)
+    assert "fomc_dates" in code
+    assert "FOMC" in description
+    # Must not claim FOMC dates aren't used, since _fomc_signal does use them.
+    assert "does not use FOMC" not in description
+
+
+def test_describe_signal_for_momentum_matches_shift_based_code():
+    hypothesis = "Does a 10-day momentum strategy on TSLA generate excess returns?"
+    code = generate_signal_code(hypothesis)
+    description = describe_signal(hypothesis)
+    assert "shift(10)" in code
+    assert "10 trading days ago" in description
+
+
+def test_describe_signal_distinguishes_golden_cross_and_price_vs_sma():
+    golden = describe_signal("Is there a golden cross signal when the 50-day SMA crosses the 200-day SMA?")
+    price_vs_sma = describe_signal("Does NFLX outperform when price is above its 200-day SMA?")
+    assert "crossover" in golden
+    assert "crossover" not in price_vs_sma
+    assert "Price-vs-SMA" in price_vs_sma

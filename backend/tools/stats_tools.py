@@ -23,14 +23,22 @@ def bootstrap_ci(
     returns: list[float],
     n_iterations: int = 1000,
     ci: float = 0.95,
+    seed: int | None = 42,
 ) -> dict[str, float]:
-    """Compute bootstrap confidence interval for mean returns."""
+    """Compute bootstrap confidence interval for mean returns.
+
+    Uses a seeded RNG (default seed=42) so repeated calls on the same
+    `returns` are reproducible — re-running the same hypothesis yields the
+    same confidence interval instead of one that drifts run to run. Pass
+    `seed=None` to use entropy-seeded randomness instead.
+    """
     if not returns:
         return {"lower": 0.0, "upper": 0.0, "mean": 0.0}
     arr = np.array(returns, dtype=float)
+    rng = np.random.default_rng(seed)
     means = []
     for _ in range(n_iterations):
-        sample = np.random.choice(arr, size=len(arr), replace=True)
+        sample = rng.choice(arr, size=len(arr), replace=True)
         means.append(float(np.mean(sample)))
     alpha = 1.0 - ci
     lower = float(np.quantile(means, alpha / 2))

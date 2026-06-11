@@ -66,7 +66,7 @@ def _detect(h: str) -> str:
         return "momentum"
     if re.search(r'\b(momentum|52.week|breakout|rate of change|roc)\b', hl):
         return "momentum"
-    if re.search(r'\b(vix|volatility spike)\b', hl):
+    if re.search(r'\b(vix|volatility)\b', hl):
         return "vix_filter"
     if re.search(r'\b(bollinger|bb|band)\b', hl):
         return "bollinger"
@@ -75,20 +75,106 @@ def _detect(h: str) -> str:
     return "mean_reversion"
 
 
+# ── Parameter extraction ───────────────────────────────────────────────────
+# Shared by the *_signal code generators below and by describe_signal(), so
+# the memo's methodology text can never disagree with the code that actually
+# ran. These prefer phrasing anchored to the indicator name (e.g. "2-day RSI",
+# "RSI(2)", "below 10", "10-day momentum") over blind positional/range-based
+# number extraction, which used to silently discard or mix up parameters that
+# fell outside hardcoded ranges (e.g. an RSI period < 5 or a momentum lookback
+# < 20 would be dropped and a default substituted instead).
+
+def _rsi_params(hypothesis: str) -> tuple[int, int, int, str]:
+    """Return (period, threshold, hold_days, comparator) for an RSI signal."""
+    h = hypothesis.lower()
+    nums = _extract_numbers(hypothesis)
+
+    period_match = re.search(r'(\d+)[\s-]*(?:day|days|period)?[\s-]*rsi', h) or \
+        re.search(r'rsi[\s(]*(\d+)', h)
+    period = int(period_match.group(1)) if period_match else next((n for n in nums if 5 <= n <= 50), 14)
+
+    below_match = re.search(r'(?:below|under|less than)\s*(\d+)', h)
+    above_match = re.search(r'(?:above|over|greater than|exceed\w*)\s*(\d+)', h)
+    if below_match:
+        threshold, comparator = int(below_match.group(1)), "<"
+    elif above_match:
+        threshold, comparator = int(above_match.group(1)), ">"
+    else:
+        threshold, comparator = next((n for n in nums if 10 <= n <= 90 and n != period), 30), "<"
+
+    hold_match = re.search(r'(?:hold(?:ing)?(?:\s*for)?|over|for)\s*(\d+)\s*(?:trading\s*)?days?', h)
+    if hold_match:
+        hold_days = int(hold_match.group(1))
+    else:
+        hold_days = next((n for n in nums if 1 <= n <= 20 and n not in (period, threshold)), 5)
+
+    return period, threshold, hold_days, comparator
+
+
+def _golden_cross_params(hypothesis: str) -> tuple[int, int]:
+    """Return (short_window, long_window) for a golden/death-cross signal."""
+    nums = _extract_numbers(hypothesis)
+    sma_nums = sorted({n for n in nums if 5 <= n <= 500})
+    short_w = sma_nums[0] if len(sma_nums) >= 1 else 50
+    long_w = sma_nums[1] if len(sma_nums) >= 2 else 200
+    return short_w, long_w
+
+
+def _price_vs_sma_params(hypothesis: str) -> tuple[int, str, str]:
+    """Return (window_days, direction, comparator) for a price-vs-SMA signal."""
+    nums = _extract_numbers(hypothesis)
+    hl = hypothesis.lower()
+    direction = "below" if "below" in hl else "above"
+    cmp = "<" if direction == "below" else ">"
+    if "month" in hl:
+        months = next((n for n in nums if 1 <= n <= 24), 10)
+        period = months * 21  # ~21 trading days per month
+    else:
+        period = next((n for n in nums if 20 <= n <= 500), 200)
+    return period, direction, cmp
+
+
+def _momentum_lookback(hypothesis: str) -> int:
+    """Return the lookback window (in trading days) for a momentum signal."""
+    h = hypothesis.lower()
+    nums = _extract_numbers(hypothesis)
+
+    month_match = re.search(r'(\d+)[\s-]*month', h)
+    if month_match:
+        return int(month_match.group(1)) * 21  # ~21 trading days per month
+
+    day_match = re.search(r'(\d+)[\s-]*(?:day|days)?[\s-]*momentum', h) or \
+        re.search(r'momentum[\s(]*(\d+)', h)
+    if day_match:
+        return int(day_match.group(1))
+
+    return next((n for n in nums if 5 <= n <= 500), 252)
+
+
+def _bollinger_period(hypothesis: str) -> int:
+    """Return the rolling window for a Bollinger Band signal."""
+    nums = _extract_numbers(hypothesis)
+    return next((n for n in nums if 5 <= n <= 100), 20)
+
+
+def _fomc_hold(hypothesis: str) -> int:
+    """Return the holding period (in trading days) for an FOMC event-study signal."""
+    nums = _extract_numbers(hypothesis)
+    return next((n for n in nums if 1 <= n <= 20), 5)
+
+
 # ── Signal implementations ─────────────────────────────────────────────────
 
 def _rsi_signal(hypothesis: str) -> str:
-    nums = _extract_numbers(hypothesis)
-    period = next((n for n in nums if 5 <= n <= 50), 14)
-    threshold = next((n for n in nums if 10 <= n <= 45 and n != period), 30)
-    hold_days = next((n for n in nums if 1 <= n <= 20 and n not in (period, threshold)), 5)
+    period, threshold, hold_days, comparator = _rsi_params(hypothesis)
+    direction = "below" if comparator == "<" else "above"
     return f"""{_HEADER}
-    # RSI mean-reversion: go long when RSI < {threshold}, hold for {hold_days} days
+    # RSI mean-reversion: go long when {period}-day RSI is {direction} {threshold}, hold for {hold_days} days
     delta = df['close'].diff()
     gain = delta.clip(lower=0).rolling({period}).mean()
     loss = (-delta.clip(upper=0)).rolling({period}).mean()
     rsi = 100 - (100 / (1 + gain / (loss + 1e-9)))
-    signal_raw = (rsi < {threshold}).astype(int)
+    signal_raw = (rsi {comparator} {threshold}).astype(int)
     # Hold for {hold_days} days after signal fires
     position = signal_raw.rolling({hold_days}).max().fillna(0)
     strat_ret = position.shift(1).fillna(0) * df['ret']
@@ -97,10 +183,7 @@ def _rsi_signal(hypothesis: str) -> str:
 
 
 def _golden_cross_signal(hypothesis: str) -> str:
-    nums = _extract_numbers(hypothesis)
-    sma_nums = sorted([n for n in nums if 5 <= n <= 500])
-    short_w = sma_nums[0] if len(sma_nums) >= 1 else 50
-    long_w = sma_nums[1] if len(sma_nums) >= 2 else 200
+    short_w, long_w = _golden_cross_params(hypothesis)
     return f"""{_HEADER}
     # Golden cross: long when {short_w}-day SMA > {long_w}-day SMA
     sma_short = df['close'].rolling({short_w}).mean()
@@ -112,18 +195,11 @@ def _golden_cross_signal(hypothesis: str) -> str:
 
 
 def _price_vs_sma_signal(hypothesis: str) -> str:
-    nums = _extract_numbers(hypothesis)
-    hl = hypothesis.lower()
-    direction = "below" if "below" in hl else "above"
-    cmp = "<" if direction == "below" else ">"
-    # Detect monthly vs daily and pick window accordingly
-    # "10-month" → 210 trading days; "200-day" → 200; default 200
-    if "month" in hl:
-        months = next((n for n in nums if 1 <= n <= 24), 10)
-        period = months * 21  # ~21 trading days per month
-        label = f"{months}-month ({period}-day) SMA"
+    period, direction, cmp = _price_vs_sma_params(hypothesis)
+    # "10-month" → 210 trading days; "200-day" → 200
+    if "month" in hypothesis.lower():
+        label = f"{period // 21}-month ({period}-day) SMA"
     else:
-        period = next((n for n in nums if 20 <= n <= 500), 200)
         label = f"{period}-day SMA"
     return f"""{_HEADER}
     # Hold when price is {direction} the {label}
@@ -152,8 +228,7 @@ def _vix_filter_signal() -> str:
 
 
 def _momentum_signal(hypothesis: str) -> str:
-    nums = _extract_numbers(hypothesis)
-    lookback = next((n for n in nums if 20 <= n <= 500), 252)
+    lookback = _momentum_lookback(hypothesis)
     return f"""{_HEADER}
     # Momentum: long when today's close > close {lookback} days ago
     position = (df['close'] > df['close'].shift({lookback})).astype(int)
@@ -163,8 +238,7 @@ def _momentum_signal(hypothesis: str) -> str:
 
 
 def _bollinger_signal(hypothesis: str) -> str:
-    nums = _extract_numbers(hypothesis)
-    period = next((n for n in nums if 5 <= n <= 100), 20)
+    period = _bollinger_period(hypothesis)
     return f"""{_HEADER}
     # Bollinger Band mean-reversion: long when price < lower band
     mid = df['close'].rolling({period}).mean()
@@ -190,8 +264,7 @@ def _macd_signal(hypothesis: str) -> str:
 
 
 def _fomc_signal(hypothesis: str) -> str:
-    nums = _extract_numbers(hypothesis)
-    hold = next((n for n in nums if 1 <= n <= 20), 5)
+    hold = _fomc_hold(hypothesis)
     return f"""{_HEADER}
     # FOMC event study: long for {hold} days starting on each FOMC date
     import datetime
@@ -243,3 +316,69 @@ def generate_signal_code(hypothesis: str) -> str:
     if sig_type == "vix_filter":
         return _vix_filter_signal()
     return _mean_reversion_signal()
+
+
+def describe_signal(hypothesis: str) -> str:
+    """Human-readable description of the signal `generate_signal_code` produces.
+
+    Built from the same detection and parameter-extraction logic as the code
+    generators above, so this description can never disagree with the code
+    that actually runs (e.g. it won't say "14-day RSI" when the generated
+    code uses a 21-day window, or describe a moving-average crossover for a
+    hypothesis that actually ran an FOMC event study).
+    """
+    sig_type = _detect(hypothesis)
+    if sig_type == "rsi":
+        period, threshold, hold_days, comparator = _rsi_params(hypothesis)
+        zone = "oversold" if comparator == "<" else "overbought"
+        day_word = "day" if hold_days == 1 else "days"
+        return (
+            f"RSI mean-reversion signal: long when the {period}-day RSI is "
+            f"{'below' if comparator == '<' else 'above'} {threshold} ({zone}), "
+            f"holding the position for {hold_days} trading {day_word}, flat otherwise."
+        )
+    if sig_type in ("golden_cross", "sma_cross"):
+        short_w, long_w = _golden_cross_params(hypothesis)
+        return (
+            f"Moving-average crossover signal: long when the {short_w}-day SMA is "
+            f"above the {long_w}-day SMA, flat otherwise."
+        )
+    if sig_type == "price_vs_sma":
+        period, direction, _cmp = _price_vs_sma_params(hypothesis)
+        return (
+            f"Price-vs-SMA signal: long while price is {direction} its {period}-day "
+            f"SMA, flat otherwise."
+        )
+    if sig_type == "momentum":
+        lookback = _momentum_lookback(hypothesis)
+        return (
+            f"Momentum signal: long when today's close is above the close from "
+            f"{lookback} trading days ago, flat otherwise."
+        )
+    if sig_type == "bollinger":
+        period = _bollinger_period(hypothesis)
+        return (
+            f"Bollinger Band mean-reversion signal: long when price closes below "
+            f"the lower {period}-day (2 std-dev) band, holding for up to 5 days, "
+            f"flat otherwise."
+        )
+    if sig_type == "macd":
+        return (
+            "MACD crossover signal: long when the MACD line (12-day EMA minus "
+            "26-day EMA) is above its 9-day EMA signal line, flat otherwise."
+        )
+    if sig_type == "fomc":
+        hold = _fomc_hold(hypothesis)
+        return (
+            f"FOMC event-study signal: long for {hold} trading days starting on "
+            f"each FOMC announcement date, flat otherwise."
+        )
+    if sig_type == "vix_filter":
+        return (
+            "Volatility-regime signal: long when 20-day realised volatility is "
+            "below 60-day realised volatility (a calm regime), flat otherwise."
+        )
+    return (
+        "5-day rolling mean-reversion signal: long after the 5-day rolling mean "
+        "daily return turns negative, flat otherwise."
+    )

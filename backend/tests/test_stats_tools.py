@@ -63,6 +63,24 @@ class TestBootstrapCi:
         wide_width = wide["upper"] - wide["lower"]
         assert wide_width >= narrow_width
 
+    def test_default_seed_is_reproducible_across_calls(self):
+        """Same inputs must yield identical CIs run-to-run (no flakiness from
+        an unseeded global RNG), so re-running a hypothesis reproduces the
+        same reported confidence interval."""
+        returns = [0.01, -0.03, 0.02, -0.01, 0.04, -0.02, 0.0, 0.015]
+        first = bootstrap_ci(returns, n_iterations=300)
+        second = bootstrap_ci(returns, n_iterations=300)
+        assert first == second
+
+    def test_explicit_seed_overrides_default(self):
+        returns = [0.01, -0.03, 0.02, -0.01, 0.04, -0.02, 0.0, 0.015]
+        a = bootstrap_ci(returns, n_iterations=300, seed=1)
+        b = bootstrap_ci(returns, n_iterations=300, seed=2)
+        # Different seeds over a small sample very likely produce different
+        # quantile estimates; means stay equal since they don't depend on the RNG.
+        assert a["mean"] == b["mean"]
+        assert a["lower"] != b["lower"] or a["upper"] != b["upper"]
+
 
 class TestComputeSharpe:
     def test_empty_returns_zero(self):
