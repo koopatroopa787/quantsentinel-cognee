@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from agents.orchestrator import quantsentinel_orchestrator
 from config import settings
+from tools.cognee_memory import forget as cognee_forget, recall as cognee_recall, setup as cognee_setup
 from evals.evaluator import run_eval
 from tools.backtest_runner import run_backtest
 from tools.chart_tools import generate_equity_curve_chart
@@ -141,9 +142,39 @@ async def _run_adk_stream(payload: RunRequest) -> AsyncGenerator[str, None]:
         session_id=run_id,
     )
 
+    # ── Cognee memory recall ────────────────────────────────────────────────
+    memories: list[dict] = []
+    try:
+        memories = await asyncio.get_event_loop().run_in_executor(
+            None, cognee_recall, payload.hypothesis
+        )
+    except Exception as _mem_exc:
+        logger.debug("cognee recall skipped: %s", _mem_exc)
+
+    yield _sse("memory", {
+        "found": len(memories),
+        "memories": memories,
+        "message": (
+            f"Recalled {len(memories)} similar past research run(s) from cognee memory."
+            if memories
+            else "No similar past research in cognee memory — starting fresh."
+        ),
+    })
+    # ── End cognee recall ───────────────────────────────────────────────────
+
+    # Enrich the hypothesis with recalled context so the orchestrator starts informed
+    memory_context = ""
+    if memories:
+        summaries = "\n".join(f"- {m.get('summary', str(m))}" for m in memories)
+        memory_context = (
+            f"\n\n[COGNEE MEMORY CONTEXT — {len(memories)} similar past run(s)]\n"
+            f"{summaries}\n"
+            f"Use this context to improve your research plan and avoid repeating failed approaches.\n"
+        )
+
     user_message = Content(
         role="user",
-        parts=[Part(text=payload.hypothesis)],
+        parts=[Part(text=payload.hypothesis + memory_context)],
     )
 
     # Emit plan event immediately so the UI feels responsive
@@ -535,6 +566,29 @@ async def _run_fallback_stream(payload: RunRequest) -> AsyncGenerator[str, None]
     import re
     run_id = str(uuid.uuid4())
 
+    # ── Cognee memory recall ────────────────────────────────────────────────
+    # Query semantic memory for past research similar to this hypothesis.
+    # The recalled context is injected into the suggestion engine so the agent
+    # improves on what it already knows rather than repeating past mistakes.
+    memories: list[dict] = []
+    try:
+        memories = await asyncio.get_event_loop().run_in_executor(
+            None, cognee_recall, payload.hypothesis
+        )
+    except Exception as _mem_exc:
+        logger.debug("cognee recall skipped: %s", _mem_exc)
+
+    yield _sse("memory", {
+        "found": len(memories),
+        "memories": memories,
+        "message": (
+            f"Recalled {len(memories)} similar past research run(s) from cognee memory."
+            if memories
+            else "No similar past research in cognee memory — starting fresh."
+        ),
+    })
+    # ── End cognee recall ───────────────────────────────────────────────────
+
     # Best-effort extract ticker and dates from the hypothesis text
     hypothesis_upper = payload.hypothesis.upper()
     # Match common 1-5 char tickers (prioritise known ones if present)
@@ -773,6 +827,7 @@ async def _log_startup() -> None:
         "ADK: timeout=%ss retries=%s (timeout→immediate fallback, 429→retry) | Fallback: always-on",
         ADK_TIMEOUT_SECS, ADK_MAX_RETRIES,
     )
+    cognee_setup()  # Initialize cognee memory layer (non-blocking)
 
 app.add_middleware(
     CORSMiddleware,
@@ -848,6 +903,18 @@ async def trigger_optimizer() -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         logger.error("Optimizer failed: %s", exc)
         return {"status": "error", "message": str(exc)}
+
+
+@app.post("/forget")
+async def forget_memory(dataset: str | None = None) -> dict[str, Any]:
+    """Clear cognee semantic memory for a dataset (default: quantsentinel_runs).
+
+    Use this to reset the agent's memory between demo sessions or to remove
+    stale research from the knowledge graph.
+    """
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, cognee_forget, dataset)
+    return {"status": "ok", "result": result}
 
 
 @app.get("/improvement")

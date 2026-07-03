@@ -47,6 +47,7 @@ export const AGENTS: Record<string, { label: string; color: string; icon: string
   statistician_agent:         { label: 'Statistician', color: '#a6a6a6', icon: '◆' },
   critic_agent:               { label: 'Critic',       color: '#cfcfcf', icon: '✦' },
   system:                     { label: 'System',       color: 'rgba(245,245,245,0.4)', icon: '▸' },
+  cognee_memory:              { label: 'Cognee Memory', color: '#a5b4fc',              icon: '◎' },
 };
 
 // ── Arc math ──────────────────────────────────────────────────────────────────

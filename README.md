@@ -1,6 +1,21 @@
 # QuantSentinel
 
-QuantSentinel is a self-improving quantitative research agent designed for the Google Cloud Rapid Agent Hackathon (Arize track). It transforms market hypotheses into auditable research memos through a multi-agent orchestration pipeline, utilizing Google ADK for agent design and Arize Phoenix for observability.
+QuantSentinel is a self-improving quantitative research agent that transforms market hypotheses into auditable research memos. It uses a multi-agent orchestration pipeline powered by Google ADK, with **Cognee as the persistent semantic memory layer** — so the agent actually remembers what it has already tested, recalls similar past research before starting a new run, and avoids repeating failed strategies.
+
+Built for the WeMakeDevs "The Hangover Part AI" hackathon.
+
+## 🧠 Cognee Memory Integration
+
+Cognee powers the full memory lifecycle for QuantSentinel:
+
+| Cognee primitive | Where it's used |
+|-----------------|-----------------|
+| **remember** | After each completed run: `cognee.add()` + `cognee.cognify()` stores the hypothesis, scores, and backtest verdict in a persistent knowledge graph |
+| **recall** | Before each new run: `cognee.search()` surfaces semantically similar past research so the agent starts informed |
+| **improve** | Recalled context is injected into the orchestrator prompt and the suggestion engine — the agent builds on what worked and avoids what didn't |
+| **forget** | Low-scoring runs (below threshold) are pruned via `cognee.delete()` to keep the memory graph clean |
+
+The orchestrator calls `recall_similar_runs()` as its first tool call (STEP 0) before planning, and a `memory` SSE event is emitted to the UI showing what was recalled.
 
 ## 🏗️ Project Architecture
 
@@ -10,16 +25,18 @@ User UI (Next.js) <---> SSE Proxy API
                            v
                     FastAPI Backend
                            |
-      +--------------------+--------------------+
-      |                    |                    |
- Orchestrator (ADK)   Tools & Services     Optimizer (DSPy)
-      |                    |                    |
-      |-- Data Agent       |-- yfinance/FRED    |-- Trace Retrieval
-      |-- Backtester       |-- Backtest Sandbox |-- Prompt Promotion
-      |-- Statistician     |-- Stats/Charts     |-- Golden Dataset
-      |-- Critic           |-- Run Store        |
-      v                    v                    v
-Phoenix Traces <----> Evaluator (Rubrics) <----> local_run_store.jsonl
+      +--------------------+--------------------+--------------------+
+      |                    |                    |                    |
+ Orchestrator (ADK)   Tools & Services     Optimizer (DSPy)   Cognee Memory
+      |                    |                    |                    |
+      |-- [STEP 0]         |-- yfinance/FRED    |-- Trace Retrieval  |-- remember()
+      |   recall_similar   |-- Backtest Sandbox |-- Prompt Promotion |-- recall()
+      |-- Data Agent       |-- Stats/Charts     |-- Golden Dataset   |-- improve()
+      |-- Backtester       |-- cognee_memory.py |                    |-- forget()
+      |-- Statistician     |-- Run Store        |                    |
+      |-- Critic           |                    |                    |
+      v                    v                    v                    v
+Phoenix Traces <----> Evaluator (Rubrics) <----> run_store.jsonl + Cognee Graph DB
 ```
 
 ## 📂 Directory Structure
@@ -116,6 +133,7 @@ Returns a time-series of evaluation scores to visualize agent improvement over t
 | **Backend Framework** | FastAPI |
 | **Agent Framework** | Google ADK (Agent Development Kit) |
 | **LLM** | Google Gemini 1.5 Pro / Flash |
+| **Memory Layer** | Cognee (graph-vector hybrid memory: remember, recall, improve, forget) |
 | **Observability** | Arize Phoenix, OpenInference |
 | **Optimization** | DSPy (Declarative Self-improving Language Programs) |
 | **Frontend** | Next.js 14, React 18, Tailwind CSS, Recharts |

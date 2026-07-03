@@ -1,3 +1,4 @@
+cognee>=1.1.0
 google-adk>=1.32.0
 google-genai>=1.0.0
 openinference-instrumentation-google-adk>=0.1.10

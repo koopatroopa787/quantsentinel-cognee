@@ -102,6 +102,37 @@ export function TopBar({ running }: { running: boolean }) {
         ))}
       </div>
 
+      {/* Powered by Cognee badge */}
+      <a
+        href="https://cognee.ai"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 12px', borderRadius: Q.rpill,
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(6,182,212,0.12) 100%)',
+          border: '1px solid rgba(99,102,241,0.35)',
+          textDecoration: 'none', transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'linear-gradient(135deg, rgba(99,102,241,0.25) 0%, rgba(6,182,212,0.2) 100%)'; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(6,182,212,0.12) 100%)'; }}
+      >
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="3.5" fill="#818cf8"/>
+          <circle cx="10" cy="3"  r="2"   fill="#818cf8" opacity="0.7"/>
+          <circle cx="10" cy="17" r="2"   fill="#818cf8" opacity="0.7"/>
+          <circle cx="3"  cy="10" r="2"   fill="#818cf8" opacity="0.7"/>
+          <circle cx="17" cy="10" r="2"   fill="#818cf8" opacity="0.7"/>
+          <line x1="10" y1="5"  x2="10" y2="7"  stroke="#818cf8" strokeWidth="1.2" opacity="0.5"/>
+          <line x1="10" y1="13" x2="10" y2="15" stroke="#818cf8" strokeWidth="1.2" opacity="0.5"/>
+          <line x1="5"  y1="10" x2="7"  y2="10" stroke="#818cf8" strokeWidth="1.2" opacity="0.5"/>
+          <line x1="13" y1="10" x2="15" y2="10" stroke="#818cf8" strokeWidth="1.2" opacity="0.5"/>
+        </svg>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#a5b4fc', letterSpacing: '0.02em', fontFamily: Q.sans }}>
+          Memory by Cognee
+        </span>
+      </a>
+
       <div style={{ flex: 1 }}/>
 
       {running && (

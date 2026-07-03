@@ -62,7 +62,22 @@ export default function HomePage() {
           let data: Record<string, unknown>;
           try { data = JSON.parse(dataMatch[1]); } catch { continue; }
 
-          if (event === "plan") {
+          if (event === "memory") {
+            const found = (data.found as number) ?? 0;
+            const msg = found > 0
+              ? `Cognee recalled ${found} similar past run(s). Agent will use this context to improve the research plan.`
+              : "No similar past research in cognee memory — starting fresh.";
+            const detail = found > 0
+              ? (data.memories as Array<{summary?: string}>).map(m => m.summary ?? "").filter(Boolean).join(" | ")
+              : "";
+            setSteps(cur => [...cur, {
+              agent: "cognee_memory",
+              status: "done",
+              message: msg,
+              output: detail || undefined,
+              startedAt: Date.now(),
+            }]);
+          } else if (event === "plan") {
             setSteps(cur => [...cur, { agent: "orchestrator", status: "planning", message: "Decomposing hypothesis into research plan…", startedAt: Date.now() }]);
           } else if (event === "step") {
             setSteps(cur => {

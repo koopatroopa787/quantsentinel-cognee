@@ -56,7 +56,14 @@ def save_run(
     scores: dict[str, float],
     backtest_result: dict[str, Any] | None = None,
 ) -> None:
-    """Append a completed run record and auto-trigger the DSPy optimizer every N runs."""
+    """Append a completed run record, store it in cognee memory, and auto-trigger optimizer."""
+    # Store in cognee semantic memory (fire-and-forget, never raises)
+    try:
+        from tools.cognee_memory import remember as _cognee_remember
+        _cognee_remember(run_id, hypothesis, scores, backtest_result)
+    except Exception:
+        pass
+
     record = {
         "run_id": run_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -10,6 +10,7 @@ from agents.critic_agent import critic_agent
 from agents.data_agent import data_agent
 from agents.statistician_agent import statistician_agent
 from tools.cache import get_cached
+from tools.cognee_memory import recall_similar_runs
 from tools.market_data import fetch_fomc_dates, fetch_ohlcv
 from tools.phoenix_query_tool import get_top_prompts, query_phoenix_traces
 
@@ -41,6 +42,15 @@ with a cache_key instead of raw arrays. You must pass cache_keys between agents
 cause context overflow and timeouts.
 
 Follow these steps STRICTLY IN ORDER, one tool call per turn:
+
+STEP 0 — Call recall_similar_runs(hypothesis=<the user's hypothesis>).
+           [Wait for result.]
+           This queries cognee's semantic memory for past research that resembles
+           this hypothesis. Use the returned memories to:
+           - Avoid repeating strategies that already scored low.
+           - Build on approaches that scored high.
+           - Note any statistical findings (Sharpe, p-values) from similar past runs.
+           If no memories are found, proceed normally.
 
 STEP 1a — Call query_phoenix_traces(max_overall_score=1.0, limit=5).
            [Wait for result.]
@@ -95,6 +105,7 @@ quantsentinel_orchestrator = Agent(
     model="gemini-3.1-pro-preview",
     description="Plans and coordinates quant research hypothesis evaluation.",
     tools=[
+        recall_similar_runs,
         fetch_ohlcv,
         fetch_fomc_dates,
         get_cached,
