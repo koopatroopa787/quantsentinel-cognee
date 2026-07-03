@@ -13,10 +13,26 @@ Cognee is the semantic layer that lets the agent learn across sessions.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import os
+import sys
+import types
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+# mistralai ships as a namespace package (no __init__.py) in recent versions;
+# instructor tries `from mistralai import Mistral` which fails without this shim.
+def _patch_mistralai() -> None:
+    try:
+        import mistralai  # noqa: F401 — import to trigger namespace resolution
+        if not hasattr(mistralai, "Mistral"):
+            from mistralai.client import Mistral  # real class lives here
+            mistralai.Mistral = Mistral
+    except Exception:
+        pass  # non-fatal — cognee will surface its own ImportError if needed
+
+_patch_mistralai()
 
 logger = logging.getLogger(__name__)
 
