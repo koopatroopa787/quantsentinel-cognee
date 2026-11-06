@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Any
@@ -10,6 +11,8 @@ import requests
 import yfinance as yf
 
 from tools.cache import get_cached, put
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_ohlcv(
